@@ -1,90 +1,118 @@
 import socket
 import threading
 import tkinter as tk
-from tkinter import simpledialog, scrolledtext
-from datetime import datetime
+from tkinter import simpledialog, scrolledtext, Canvas, Frame
 
 SERVER_IP = "13.62.126.225"  # Replace with your EC2 IP
 PORT = 5000
 
-class ClientFrame(tk.Frame):
-    def __init__(self, master):
-        super().__init__(master, bg="#f0f0f0", bd=2, relief="groove", padx=5, pady=5)
+# Connect to server
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client_socket.connect((SERVER_IP, PORT))
 
-        # Ask for username
-        self.username = simpledialog.askstring("Username", "Enter username for this client:", parent=master)
-        if not self.username:
-            self.username = "Anonymous"
+# ---------------- THEME SETTINGS ----------------
+BG_COLOR = "#1e1e1e"
+HEADER_COLOR = "#272727"
+TEXT_COLOR = "#ffffff"
+INPUT_COLOR = "#333333"
+MY_MSG_COLOR = "#4e9eff"
+OTHER_MSG_COLOR = "#3b3b3b"
+FONT = ("Segoe UI", 11)
 
-        # Connect to server
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_socket.connect((SERVER_IP, PORT))
-        self.client_socket.sendall(self.username.encode())
+# ---------------- GUI WINDOW ----------------
+root = tk.Tk()
+root.title("Chat Client")
+root.geometry("500x600")
+root.config(bg=BG_COLOR)
 
-        # Chat display area
-        self.chat_area = scrolledtext.ScrolledText(self, state='disabled', width=50, height=20, font=("Arial", 12))
-        self.chat_area.pack(padx=5, pady=5)
+# ---------------- HEADER BAR ----------------
+header = tk.Frame(root, bg=HEADER_COLOR, height=60)
+header.pack(fill=tk.X)
 
-        # Input box
-        self.msg_entry = tk.Entry(self, width=50, font=("Arial", 12))
-        self.msg_entry.pack(padx=5, pady=(0,5))
-        self.msg_entry.bind("<Return>", self.send_message)
+title_label = tk.Label(header, text="💬 Python Chat Client", font=("Segoe UI", 16, "bold"),
+                       bg=HEADER_COLOR, fg="white")
+title_label.pack(pady=10)
 
-        # Start listener thread
-        threading.Thread(target=self.listen_for_messages, daemon=True).start()
+# ---------------- CHAT AREA ----------------
+chat_frame = scrolledtext.ScrolledText(root, state='disabled', bg=BG_COLOR,
+                                       fg=TEXT_COLOR, font=FONT, wrap=tk.WORD)
+chat_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-    def listen_for_messages(self):
-        while True:
-            try:
-                data = self.client_socket.recv(1024)
-                if not data:
-                    break
+# ---------------- INPUT AREA ----------------
+bottom_frame = tk.Frame(root, bg=BG_COLOR)
+bottom_frame.pack(fill=tk.X, pady=10)
 
-                message = data.decode()
-                timestamp = datetime.now().strftime("%H:%M")
+msg_entry = tk.Entry(bottom_frame, bg=INPUT_COLOR, fg="white", font=FONT,
+                     relief=tk.FLAT, width=35)
+msg_entry.grid(row=0, column=0, padx=10)
 
-                self.chat_area.config(state='normal')
+send_btn = tk.Button(bottom_frame, text="Send", bg="#4e9eff", fg="white",
+                     font=("Segoe UI", 11, "bold"), relief=tk.FLAT, width=8)
+send_btn.grid(row=0, column=1, padx=5)
 
-                # Differentiate own messages
-                if message.startswith(f"[{self.username}]"):
-                    # Right-aligned and green
-                    self.chat_area.tag_config("own", foreground="green", justify="right")
-                    self.chat_area.insert(tk.END, f"{timestamp} {message}\n", "own")
-                else:
-                    # Left-aligned and blue
-                    self.chat_area.tag_config("other", foreground="blue", justify="left")
-                    self.chat_area.insert(tk.END, f"{timestamp} {message}\n", "other")
+# ---------------- ASK USERNAME ----------------
+username = simpledialog.askstring("Username", "Enter your username:", parent=root)
+client_socket.sendall(username.encode())
 
-                self.chat_area.yview(tk.END)
-                self.chat_area.config(state='disabled')
-            except:
+# ---------------- DISPLAY FUNCTION ----------------
+def write_message(sender, message, my_msg=False):
+    chat_frame.config(state='normal')
+
+    if my_msg:
+        chat_frame.insert(tk.END, f"{sender} (You): ", "me")
+        chat_frame.insert(tk.END, message + "\n\n", "my_msg")
+    else:
+        chat_frame.insert(tk.END, f"{sender}: ", "other")
+        chat_frame.insert(tk.END, message + "\n\n", "other_msg")
+
+    chat_frame.tag_config("me", foreground="#4e9eff", font=("Segoe UI", 10, "bold"))
+    chat_frame.tag_config("my_msg", foreground="white")
+    chat_frame.tag_config("other", foreground="#cccbcb", font=("Segoe UI", 10, "bold"))
+    chat_frame.tag_config("other_msg", foreground="white")
+
+    chat_frame.yview(tk.END)
+    chat_frame.config(state='disabled')
+
+# ---------------- LISTEN THREAD ----------------
+def listen_for_messages():
+    while True:
+        try:
+            data = client_socket.recv(1024).decode()
+            if not data:
                 break
 
-    def send_message(self, event=None):
-        msg = self.msg_entry.get().strip()
-        if msg == "":
-            return
-        self.client_socket.sendall(msg.encode())
-        self.msg_entry.delete(0, tk.END)
+            # SERVER MESSAGE FORMAT:  username: message
+            if ": " in data:
+                sender, msg = data.split(": ", 1)
+                write_message(sender, msg, my_msg=False)
+            else:
+                write_message("", data, my_msg=False)
 
-    def close(self):
-        self.client_socket.close()
+        except:
+            break
 
+threading.Thread(target=listen_for_messages, daemon=True).start()
 
-# Main GUI window
-root = tk.Tk()
-root.title("Creative Python Chat")
+# ---------------- SEND MESSAGE ----------------
+def send_message(event=None):
+    msg = msg_entry.get().strip()
+    if msg == "":
+        return
 
-# Frames for two clients
-client1 = ClientFrame(root)
-client1.pack(side='left', padx=10, pady=10)
+    client_socket.sendall(msg.encode())
+    write_message(username, msg, my_msg=True)
 
-client2 = ClientFrame(root)
-client2.pack(side='right', padx=10, pady=10)
+    msg_entry.delete(0, tk.END)
 
+send_btn.config(command=send_message)
+msg_entry.bind("<Return>", send_message)
+
+# ---------------- WINDOW CLOSE ----------------
 def on_closing():
-    client1.close()
-    client2.close()
+    try:
+        client_socket.close()
+    except:
+        pass
     root.destroy()
 
 root.protocol("WM_DELETE_WINDOW", on_closing)
